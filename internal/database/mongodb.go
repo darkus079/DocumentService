@@ -1,0 +1,47 @@
+package database
+
+import (
+	"context"
+	"time"
+
+	"documentservice/internal/config"
+
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+)
+
+// MongoDB represents MongoDB connection
+type MongoDB struct {
+	Client   *mongo.Client
+	Database *mongo.Database
+}
+
+// NewMongoDB creates a new MongoDB connection
+func NewMongoDB(cfg *config.Config) (*MongoDB, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(cfg.MongoURI))
+	if err != nil {
+		return nil, err
+	}
+
+	// Test the connection
+	if err := client.Ping(ctx, nil); err != nil {
+		return nil, err
+	}
+
+	database := client.Database(cfg.MongoDatabase)
+
+	return &MongoDB{
+		Client:   client,
+		Database: database,
+	}, nil
+}
+
+// Close closes the MongoDB connection
+func (m *MongoDB) Close() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return m.Client.Disconnect(ctx)
+}
