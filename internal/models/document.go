@@ -32,3 +32,23 @@ type QueryParams struct {
 	Value string `json:"value,omitempty"`
 	Limit int    `json:"limit,omitempty"`
 }
+
+type DocumentMeta struct {
+	Name   string   `json:"name"`
+	File   bool     `json:"file"`
+	Public bool     `json:"public"`
+	Token  string   `json:"token"`
+	MIME   string   `json:"mime"`
+	Grant  []string `json:"grant"`
+}
+
+type DocumentUploadResponse struct {
+	Data struct {
+		JSON interface{} `json:"json,omitempty"`
+		File string      `json:"file,omitempty"`
+	} `json:"data"`
+}
+
+type DocumentDeleteResponse struct {
+	Response map[string]bool `json:"response"`
+}
