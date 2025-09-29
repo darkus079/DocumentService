@@ -41,11 +41,11 @@ func (s *Server) Start() error {
 	usersCollection := mongoDB.Database.Collection("users")
 	documentsCollection := mongoDB.Database.Collection("documents")
 
-	tokenMgr := auth.NewTokenManager(usersCollection)
+	tokenMgr := auth.NewTokenManager(usersCollection, s.config.AdminToken)
 	docRepo := repository.NewDocumentRepository(documentsCollection)
 	docService := service.NewDocumentService(docRepo, tokenMgr, s.config.MaxFileSize)
 
-	docHandler := handler.NewDocumentHandler(docService)
+	docHandler := handler.NewDocumentHandler(docService, tokenMgr)
 
 	router := s.setupRoutes(docHandler)
 
@@ -87,8 +87,13 @@ func (s *Server) setupRoutes(docHandler *handler.DocumentHandler) *mux.Router {
 
 	api := router.PathPrefix("/api").Subrouter()
 
+	api.HandleFunc("/register", docHandler.Register).Methods("POST")
+	api.HandleFunc("/auth", docHandler.Auth).Methods("POST")
+	api.HandleFunc("/auth/{token}", docHandler.Logout).Methods("DELETE")
 	api.HandleFunc("/docs", docHandler.GetDocuments).Methods("GET", "HEAD")
+	api.HandleFunc("/docs", docHandler.UploadDocument).Methods("POST")
 	api.HandleFunc("/docs/{id}", docHandler.GetDocument).Methods("GET", "HEAD")
+	api.HandleFunc("/docs/{id}", docHandler.DeleteDocument).Methods("DELETE")
 
 	router.HandleFunc("/health", docHandler.HealthCheck).Methods("GET")
 
