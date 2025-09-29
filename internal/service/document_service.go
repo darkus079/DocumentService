@@ -5,20 +5,21 @@ import (
 	"fmt"
 	"mime"
 	"net/http"
+	"time"
 
 	"documentservice/internal/auth"
 	"documentservice/internal/models"
 	"documentservice/internal/repository"
+
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-// DocumentService handles document business logic
 type DocumentService struct {
 	docRepo     *repository.DocumentRepository
 	tokenMgr    *auth.TokenManager
 	maxFileSize int64
 }
 
-// NewDocumentService creates a new document service
 func NewDocumentService(docRepo *repository.DocumentRepository, tokenMgr *auth.TokenManager, maxFileSize int64) *DocumentService {
 	return &DocumentService{
 		docRepo:     docRepo,
@@ -27,31 +28,26 @@ func NewDocumentService(docRepo *repository.DocumentRepository, tokenMgr *auth.T
 	}
 }
 
-// GetDocuments retrieves documents with authentication and filtering
 func (ds *DocumentService) GetDocuments(ctx context.Context, params models.QueryParams) (*models.APIResponse, error) {
-	// Validate token
 	userLogin, err := ds.tokenMgr.ValidateToken(params.Token)
 	if err != nil {
 		return models.NewErrorResponse(401, "Unauthorized"), nil
 	}
 
-	// If no login specified, use the token owner's login
 	if params.Login == "" {
 		params.Login = userLogin
 	}
 
-	// Get documents
 	documents, err := ds.docRepo.GetDocuments(ctx, params)
 	if err != nil {
 		return models.NewErrorResponse(500, "Internal server error"), err
 	}
 
-	// Filter documents based on access rights
 	var accessibleDocs []models.Document
 	for _, doc := range documents {
 		hasAccess, err := ds.docRepo.CheckDocumentAccess(ctx, doc.ID, userLogin)
 		if err != nil {
-			continue // Skip documents with access check errors
+			continue
 		}
 		if hasAccess {
 			accessibleDocs = append(accessibleDocs, doc)
@@ -62,15 +58,12 @@ func (ds *DocumentService) GetDocuments(ctx context.Context, params models.Query
 	return models.NewSuccessResponse(response), nil
 }
 
-// GetDocument retrieves a single document with authentication
 func (ds *DocumentService) GetDocument(ctx context.Context, docID, token string) (*models.APIResponse, *http.Response, error) {
-	// Validate token
 	userLogin, err := ds.tokenMgr.ValidateToken(token)
 	if err != nil {
 		return models.NewErrorResponse(401, "Unauthorized"), nil, nil
 	}
 
-	// Check document access
 	hasAccess, err := ds.docRepo.CheckDocumentAccess(ctx, docID, userLogin)
 	if err != nil {
 		return models.NewErrorResponse(500, "Internal server error"), nil, err
@@ -79,7 +72,6 @@ func (ds *DocumentService) GetDocument(ctx context.Context, docID, token string)
 		return models.NewErrorResponse(403, "Access denied"), nil, nil
 	}
 
-	// Get document
 	document, err := ds.docRepo.GetDocumentByID(ctx, docID)
 	if err != nil {
 		if err.Error() == "document not found" {
@@ -88,9 +80,7 @@ func (ds *DocumentService) GetDocument(ctx context.Context, docID, token string)
 		return models.NewErrorResponse(500, "Internal server error"), nil, err
 	}
 
-	// If it's a file, return the file content
 	if document.File && len(document.Content) > 0 {
-		// Set appropriate MIME type
 		mimeType := document.MIME
 		if mimeType == "" {
 			mimeType = mime.TypeByExtension("." + getFileExtension(document.Name))
@@ -99,7 +89,6 @@ func (ds *DocumentService) GetDocument(ctx context.Context, docID, token string)
 			}
 		}
 
-		// Create HTTP response for file content
 		httpResp := &http.Response{
 			StatusCode: 200,
 			Header:     make(http.Header),
@@ -110,11 +99,9 @@ func (ds *DocumentService) GetDocument(ctx context.Context, docID, token string)
 		return models.NewSuccessResponse(document), httpResp, nil
 	}
 
-	// Return JSON response for non-file documents
 	return models.NewSuccessResponse(document), nil, nil
 }
 
-// ValidateFileSize validates if file size is within limits
 func (ds *DocumentService) ValidateFileSize(size int64) error {
 	if size > ds.maxFileSize {
 		return fmt.Errorf("file size exceeds maximum allowed size of %d bytes", ds.maxFileSize)
@@ -122,14 +109,11 @@ func (ds *DocumentService) ValidateFileSize(size int64) error {
 	return nil
 }
 
-// ValidateMIMEType validates MIME type
 func (ds *DocumentService) ValidateMIMEType(mimeType string) error {
-	// Basic MIME type validation
 	if mimeType == "" {
 		return fmt.Errorf("MIME type is required")
 	}
 
-	// Check if it's a valid MIME type format
 	_, _, err := mime.ParseMediaType(mimeType)
 	if err != nil {
 		return fmt.Errorf("invalid MIME type format")
@@ -138,7 +122,75 @@ func (ds *DocumentService) ValidateMIMEType(mimeType string) error {
 	return nil
 }
 
-// getFileExtension extracts file extension from filename
+func (ds *DocumentService) UploadDocument(ctx context.Context, meta models.DocumentMeta, jsonData interface{}, fileContent []byte) (*models.DocumentUploadResponse, error) {
+	userLogin, err := ds.tokenMgr.ValidateToken(meta.Token)
+	if err != nil {
+		return nil, fmt.Errorf("unauthorized")
+	}
+
+	if err := ds.ValidateFileSize(int64(len(fileContent))); err != nil {
+		return nil, err
+	}
+
+	if err := ds.ValidateMIMEType(meta.MIME); err != nil {
+		return nil, err
+	}
+
+	docID := primitive.NewObjectID().Hex()
+	document := &models.Document{
+		ID:      docID,
+		Name:    meta.Name,
+		MIME:    meta.MIME,
+		File:    meta.File,
+		Public:  meta.Public,
+		Grant:   meta.Grant,
+		Owner:   userLogin,
+		Content: fileContent,
+		Created: time.Now(),
+	}
+
+	if err := ds.docRepo.CreateDocument(ctx, document); err != nil {
+		return nil, fmt.Errorf("failed to create document: %w", err)
+	}
+
+	response := &models.DocumentUploadResponse{}
+	if jsonData != nil {
+		response.Data.JSON = jsonData
+	}
+	if meta.File {
+		response.Data.File = meta.Name
+	}
+
+	return response, nil
+}
+
+func (ds *DocumentService) DeleteDocument(ctx context.Context, docID, token string) (*models.DocumentDeleteResponse, error) {
+	userLogin, err := ds.tokenMgr.ValidateToken(token)
+	if err != nil {
+		return nil, fmt.Errorf("unauthorized")
+	}
+
+	hasAccess, err := ds.docRepo.CheckDocumentAccess(ctx, docID, userLogin)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check access: %w", err)
+	}
+	if !hasAccess {
+		return nil, fmt.Errorf("access denied")
+	}
+
+	if err := ds.docRepo.DeleteDocument(ctx, docID); err != nil {
+		return nil, fmt.Errorf("failed to delete document: %w", err)
+	}
+
+	response := &models.DocumentDeleteResponse{
+		Response: map[string]bool{
+			docID: true,
+		},
+	}
+
+	return response, nil
+}
+
 func getFileExtension(filename string) string {
 	for i := len(filename) - 1; i >= 0; i-- {
 		if filename[i] == '.' {
