@@ -11,6 +11,7 @@ type Config struct {
 	MongoDatabase string
 	RedisAddr     string
 	MaxFileSize   int64
+	AdminToken    string
 }
 
 func LoadConfig() *Config {
@@ -20,6 +21,7 @@ func LoadConfig() *Config {
 		MongoDatabase: getEnv("MONGO_DATABASE", "documentservice"),
 		RedisAddr:     getEnv("REDIS_ADDR", "localhost:6379"),
 		MaxFileSize:   getEnvAsInt64("MAX_FILE_SIZE", 50*1024*1024),
+		AdminToken:    getEnv("ADMIN_TOKEN", "admin123"),
 	}
 }
 
