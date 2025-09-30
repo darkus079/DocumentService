@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: documentservice_mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password
+      MONGO_INITDB_DATABASE: documentservice
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - documentservice_network
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: documentservice_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - documentservice_network
+
+  app:
+    build: .
+    container_name: documentservice_app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      SERVER_PORT: 8000
+      MONGO_URI: mongodb://admin:password@mongodb:27017/documentservice?authSource=admin
+      MONGO_DATABASE: documentservice
+      REDIS_ADDR: redis:6379
+      MAX_FILE_SIZE: 52428800
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - documentservice_network
+
+volumes:
+  mongodb_data:
+  redis_data:
+
+networks:
+  documentservice_network:
+    driver: bridge
